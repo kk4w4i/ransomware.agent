@@ -57,11 +57,5 @@ It is **not a standalone end-user application**—it is the backend logic and se
 - The agent will not operate without valid database and infrastructure connections.
 - This codebase serves primarily as a backend microservice/API component.
 
-***
-
-## Contributions & Inquiries
-
-- Feel free to submit issues or PRs for improvements and bug fixes.
-- For research or collaboration discussions, reach out through [LinkedIn](https://www.linkedin.com/in/kintarokawai/).
 
 
