@@ -6,7 +6,7 @@
 
 The aim is to support forensics and investigators by automating the monitoring process against to volatile dark web resources.
 
-Inspired by existing efforts like [ransomware.live](https://ransomware.live) and frameworks like Agent-E by emergence.ai, this project explores next-generation agentic workflows for ransomware site analysis.
+Inspired by existing efforts like [ransomware.live](https://ransomware.live) and frameworks like Agent-E by emergence.ai, this project explores agentic workflows for ransomware site analysis.
 
 > If you’re interested in technical details, see my [thesis paper](#) (TBA).  
 > For professional contact or questions, connect on [LinkedIn](https://www.linkedin.com/in/kintarokawai/).
@@ -63,4 +63,5 @@ It is **not a standalone end-user application**—it is the backend logic and se
 
 - Feel free to submit issues or PRs for improvements and bug fixes.
 - For research or collaboration discussions, reach out through [LinkedIn](https://www.linkedin.com/in/kintarokawai/).
+
 
