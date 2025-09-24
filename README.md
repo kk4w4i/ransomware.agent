@@ -2,7 +2,9 @@
 
 ## Introduction
 
-**ransomeware.agent** is my ([kk4w4i](https://github.com/kk4w4i)) thesis project focused on intelligent monitoring of public name-and-shame ransomware sites hosted on the TOR network. The aim: support forensics and investigators by automating access to volatile dark web resources.
+**ransomeware.agent** is my ([kk4w4i](https://github.com/kk4w4i)) thesis project focused on intelligent monitoring of public name-and-shame ransomware sites hosted on the TOR network. 
+
+The aim is to support forensics and investigators by automating the monitoring process against to volatile dark web resources.
 
 Inspired by existing efforts like [ransomware.live](https://ransomware.live) and frameworks like Agent-E by emergence.ai, this project explores next-generation agentic workflows for ransomware site analysis.
 
@@ -61,3 +63,4 @@ It is **not a standalone end-user application**—it is the backend logic and se
 
 - Feel free to submit issues or PRs for improvements and bug fixes.
 - For research or collaboration discussions, reach out through [LinkedIn](https://www.linkedin.com/in/kintarokawai/).
+
