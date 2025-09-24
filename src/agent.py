@@ -4,6 +4,7 @@ from src.managers.llm_manager import LLMManager
 import ast
 from src.utils.text_utils import clean_text
 import hashlib
+from src.utils.map_actions_to_results import map_actions_to_results
 
 async def run_agent(
         start_url: str,
@@ -11,6 +12,7 @@ async def run_agent(
         headless: bool = True,
         victims_collection=None,
         session_collection=None,
+        hf_token: str = None,
         max_steps: int = 20
     ):
     try:
@@ -25,6 +27,7 @@ async def run_agent(
             headless=headless,
             victims_collection=victims_collection,
             session_collection=session_collection,
+            hf_token=hf_token,
             llm=llm
         )
         await bm.start()
@@ -71,11 +74,13 @@ async def run_agent(
                 if isinstance(plan, str):
                     plan = ast.literal_eval(plan)
                 actions = plan if isinstance(plan, list) else []
+                print(actions)
                 results = await bm.execute(actions)
-                print(f"Execution results: {results}")
+
+                mapped_action_result = map_actions_to_results(actions, results, strict=True)
 
                 # Add the actions to the history context
-                pm.update_history(bm._page.url, actions)
+                pm.update_history(bm._page.url, mapped_action_result)
             except Exception as e:
                 print(f"Action execution failed: {e}")
                 break

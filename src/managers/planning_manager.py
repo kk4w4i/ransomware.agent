@@ -34,7 +34,6 @@ class PlanningManager:
         plan = await llm.get_llm_plan(str(context.planning_context))
         return plan
 
-    def update_history(self, url: str, actions: list):
-        for action in actions:
-            history = HistoryContext(url, action)
-            self.historical_actions.append(history)
+    def update_history(self, url: str, action_mapped_results: dict):
+        history = HistoryContext(url, action_mapped_results)
+        self.historical_actions.append(history)

@@ -10,7 +10,7 @@ from src.utils.text_utils import clean_text
 class BrowserManager:
     _instance = None
 
-    def __init__(self, start_url: str, headless: bool, llm: LLMManager, victims_collection, session_collection):
+    def __init__(self, start_url: str, headless: bool, llm: LLMManager, victims_collection, session_collection, hf_token: str = None):
         if not start_url:
             raise ValueError("Start URL cannot be empty")
         if BrowserManager._instance:
@@ -34,6 +34,7 @@ class BrowserManager:
         self.headless = headless
         self.victims_collection = victims_collection
         self.session_collection = session_collection
+        self.hf_token = hf_token
         self.llm = llm
     
     async def start(self):
@@ -87,7 +88,7 @@ class BrowserManager:
                 if name == "scrape_and_store":
                     mod = importlib.import_module(self._actions[name])
                      # scrape_and_store expects page and context_size
-                    result = await mod.run(self._page, self.victims_collection, self.session_collection, self.llm)
+                    result = await mod.run(self._page, self.victims_collection, self.session_collection, self.llm, self.hf_token)
                     print(f"[EXECUTE] Result: {result}")
                     results.append(result)
                 else:
