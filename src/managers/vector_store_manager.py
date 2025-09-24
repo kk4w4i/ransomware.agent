@@ -33,28 +33,22 @@ class LocalEmbeddings:
 class VectorStoreManager:
     """Vector store manager using local embeddings + MongoDB Atlas Vector Search."""
 
-    # Keep backward-compat with existing call site that passes hf_token
-    def __init__(self, _unused_token: str | None = None, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         self.embedder = LocalEmbeddings(model_name)
         self._closed = False
 
-    # Allow: async with VectorStoreManager(...) as vector_store:
     async def __aenter__(self):
         loop = asyncio.get_running_loop()
-        # Load the model off-thread; sets embedding_dimensions
         await loop.run_in_executor(None, self.embedder._load_model)
         return self
 
-    async def __aexit__(self, exc_type, exc, tb):
-        # Nothing to free right now, but keep hook for future resources
+    async def __aexit__(self):
         self._closed = True
 
     async def setup_vector_index(self, collection, index_name: str = "vector_index"):
-        # Ensure dimensions known before index creation
         if self.embedder.embedding_dimensions is None:
             self.embedder._load_model()
 
-        # Correct Atlas Vector Search index definition (knnVector)
         index_definition = {
             "name": index_name,
             "definition": {
@@ -75,7 +69,6 @@ class VectorStoreManager:
             await collection.create_search_index(index_definition)
             logger.info(f"✅ Vector search index '{index_name}' created or already exists")
         except Exception as e:
-            # Often safe to ignore if the index already exists or creation is restricted on the cluster tier
             logger.warning(f"⚠️ Vector index creation failed (may already exist or be unsupported on this cluster): {e}")
 
     def create_searchable_text(self, entry: Dict[str, Any]) -> str:

@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import motor.motor_asyncio
+import motor.motor_asyncio # type: ignore
 import os
 
 from src.agent import run_agent
@@ -11,7 +11,6 @@ client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_DB_URI)
 db = client['ransomware_db']
 victims_collection = db['victims']
 session_collection = db['session']
-hf_token = os.getenv("HF_TOKEN")
 
 @app.route('/run_agent', methods=['POST'])
 def agent_endpoint():
@@ -22,12 +21,11 @@ def agent_endpoint():
     max_steps = data.get('max_steps')
     if not start_url:
         return jsonify({"error": "Missing start_url"}), 400
-    # Pass MongoDB handles to your agent
+    
     import asyncio
     result = asyncio.run(run_agent(start_url, headless=headless,
                                    victims_collection=victims_collection,
                                    session_collection=session_collection,
-                                   hf_token=hf_token,
                                    model=model,
                                    max_steps=max_steps))
     return jsonify(result)

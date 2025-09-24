@@ -104,7 +104,7 @@ async def process_chunk(i, chunks, llm: LLMManager, victims_collection, vector_s
     return results
 
 # -------- Main Run Action (CONCURRENT) --------
-async def run(page, victims_collection, sessions_collection, llm: LLMManager, hf_token: str, similarity_threshold: float = 0.85):
+async def run(page, victims_collection, sessions_collection, llm: LLMManager, similarity_threshold: float = 0.85):
     """
     Main scraping function with vector store integration
     
@@ -113,13 +113,12 @@ async def run(page, victims_collection, sessions_collection, llm: LLMManager, hf
         victims_collection: MongoDB collection for victims
         sessions_collection: MongoDB collection for sessions
         llm: LLM Manager instance
-        hf_token: Hugging Face API token
         similarity_threshold: Similarity threshold for duplicate detection (0.0-1.0)
     """
     print("🔎 Starting full page scrape with vector similarity detection!")
     
     # Initialize vector store manager
-    async with VectorStoreManager(hf_token) as vector_store:
+    async with VectorStoreManager() as vector_store:
         # Setup vector index (runs once, safe to call multiple times)
         await vector_store.setup_vector_index(victims_collection)
         

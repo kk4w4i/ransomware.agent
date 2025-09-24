@@ -12,7 +12,6 @@ async def run_agent(
         headless: bool = True,
         victims_collection=None,
         session_collection=None,
-        hf_token: str = None,
         max_steps: int = 20
     ):
     try:
@@ -27,7 +26,6 @@ async def run_agent(
             headless=headless,
             victims_collection=victims_collection,
             session_collection=session_collection,
-            hf_token=hf_token,
             llm=llm
         )
         await bm.start()
