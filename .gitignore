@@ -1,4 +1,4 @@
 .env
-*_venv
+*venv
 listofsites.txt
 __pycache__/

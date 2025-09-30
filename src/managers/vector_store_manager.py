@@ -42,7 +42,7 @@ class VectorStoreManager:
         await loop.run_in_executor(None, self.embedder._load_model)
         return self
 
-    async def __aexit__(self):
+    async def __aexit__(self, exc_type, exc, tb):
         self._closed = True
 
     async def setup_vector_index(self, collection, index_name: str = "vector_index"):
@@ -136,8 +136,64 @@ class VectorStoreManager:
         try:
             entry = await self.normalize_entry(entry) 
             similar = await self.find_similar_entries(collection, entry, threshold=similarity_threshold)
+
+            debug_summary = {
+                'inputVictimCompany': entry.get('victimCompany'),
+                'threshold': similarity_threshold,
+                'matches': [
+                    {
+                        'victimCompany': match.get('victimCompany'),
+                        'score': float(match.get('score', 0.0) or 0.0),
+                        'ransomwareGroup': match.get('ransomwareGroup'),
+                        'id': str(match.get('_id', '')),
+                    }
+                    for match in similar
+                ],
+            }
+
+            if debug_summary['matches']:
+                logger.info(
+                    "Vector similarity results for %s (threshold %.2f): %s",
+                    debug_summary['inputVictimCompany'],
+                    similarity_threshold,
+                    ", ".join(
+                        f"{item['victimCompany']}={item['score']:.3f}"
+                        for item in debug_summary['matches']
+                    ),
+                )
+            else:
+                logger.info(
+                    "Vector similarity results for %s (threshold %.2f): no matches",
+                    debug_summary['inputVictimCompany'],
+                    similarity_threshold,
+                )
+
+            try:
+                from src.managers.stream_manager import StreamManager  # avoid top-level import
+
+                stream_manager = StreamManager.get_instance()
+                await stream_manager.push_event('vector_similarity', debug_summary)
+            except Exception as push_error:  # pylint: disable=broad-except
+                logger.debug("Unable to push vector similarity event: %s", push_error)
+
             if similar:
                 top = similar[0]
+                try:
+                    from src.managers.stream_manager import StreamManager  # avoid top-level import
+
+                    stream_manager = StreamManager.get_instance()
+                    await stream_manager.push_event(
+                        'storage',
+                        {
+                            'stored': False,
+                            'victimCompany': entry.get('victimCompany'),
+                            'matchedVictim': top.get('victimCompany'),
+                            'similarityScore': top.get('score', 0.0),
+                            'threshold': similarity_threshold,
+                        },
+                    )
+                except Exception as push_error:  # pylint: disable=broad-except
+                    logger.debug("Unable to push storage event: %s", push_error)
                 return {'stored': False, 'entry': top, 'similarity_score': top.get('score', 0.0)}
 
             searchable_text = self.create_searchable_text(entry)
@@ -149,6 +205,21 @@ class VectorStoreManager:
             returned = doc.copy()
             returned.pop('embedding', None)
             returned['_id'] = result.inserted_id
+            try:
+                from src.managers.stream_manager import StreamManager  # avoid top-level import
+
+                stream_manager = StreamManager.get_instance()
+                await stream_manager.push_event(
+                    'storage',
+                    {
+                        'stored': True,
+                        'victimCompany': entry.get('victimCompany'),
+                        'threshold': similarity_threshold,
+                        'documentId': str(result.inserted_id),
+                    },
+                )
+            except Exception as push_error:  # pylint: disable=broad-except
+                logger.debug("Unable to push storage event: %s", push_error)
             return {'stored': True, 'entry': returned, 'similarity_score': None}
 
         except Exception as e:
@@ -156,4 +227,21 @@ class VectorStoreManager:
             result = await collection.insert_one(entry)
             fallback = entry.copy()
             fallback['_id'] = result.inserted_id
+            try:
+                from src.managers.stream_manager import StreamManager  # avoid top-level import
+
+                stream_manager = StreamManager.get_instance()
+                await stream_manager.push_event(
+                    'storage',
+                    {
+                        'stored': True,
+                        'victimCompany': entry.get('victimCompany'),
+                        'threshold': similarity_threshold,
+                        'documentId': str(result.inserted_id),
+                        'fallback': True,
+                        'error': str(e),
+                    },
+                )
+            except Exception as push_error:  # pylint: disable=broad-except
+                logger.debug("Unable to push storage event: %s", push_error)
             return {'stored': True, 'entry': fallback, 'similarity_score': None}

@@ -2,10 +2,12 @@ import importlib
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError # type: ignore
 import asyncio
 import traceback
+from typing import Optional
 
 from src.contexts.sensingContext import SensingContext
 from src.managers.llm_manager import LLMManager
 from src.utils.text_utils import clean_text
+from src.managers.stream_manager import StreamManager
 
 class BrowserManager:
     _instance = None
@@ -36,6 +38,7 @@ class BrowserManager:
         self.session_collection = session_collection
         self.hf_token = hf_token
         self.llm = llm
+        self._stream_manager: Optional[StreamManager] = None
     
     async def start(self):
         async def _launch_browser():
@@ -50,6 +53,15 @@ class BrowserManager:
             try:
                 await _launch_browser()
                 await self._page.goto(self._start_url)
+                self._stream_manager = StreamManager.get_instance()
+                await self._stream_manager.start_stream(
+                    self._page,
+                    metadata={
+                        "startUrl": self._start_url,
+                        "proxy": "socks5://localhost:9050",
+                        "headless": self.headless,
+                    },
+                )
                 return  # Success!
             except PlaywrightTimeoutError:
                 print(f"Timeout on attempt {attempt+1}/{retries}. Resetting browser...")
@@ -88,7 +100,7 @@ class BrowserManager:
                 if name == "scrape_and_store":
                     mod = importlib.import_module(self._actions[name])
                      # scrape_and_store expects page and context_size
-                    result = await mod.run(self._page, self.victims_collection, self.session_collection, self.llm, self.hf_token)
+                    result = await mod.run(self._page, self.victims_collection, self.session_collection, self.llm)
                     print(f"[EXECUTE] Result: {result}")
                     results.append(result)
                 else:
@@ -172,6 +184,9 @@ class BrowserManager:
 
 
     async def exit(self):
+        if self._stream_manager is not None:
+            await self._stream_manager.stop_stream()
+            self._stream_manager = None
         if self._browser is not None:
             await self._browser.close()
             self._browser = None
