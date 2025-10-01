@@ -123,9 +123,6 @@ async def run_agent(
                 await stream_manager.push_event(
                     "execution",
                     {
-                        "step": steps,
-                        "actions": actions,
-                        "results": results,
                         "mappedResults": mapped_action_result,
                     },
                 )
