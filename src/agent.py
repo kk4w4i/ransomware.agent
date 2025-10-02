@@ -1,19 +1,23 @@
-from src.managers.browser_manager import BrowserManager
-from src.managers.planning_manager import PlanningManager
-from src.managers.llm_manager import LLMManager
-from src.managers.stream_manager import StreamManager
 import ast
-from src.utils.text_utils import clean_text
 import hashlib
-from src.utils.map_actions_to_results import map_actions_to_results
-from typing import Callable, Optional
+import os
 from threading import Event
 from typing import Callable, Optional
+
+from motor.motor_asyncio import AsyncIOMotorClient
+
+from src.managers.browser_manager import BrowserManager
+from src.managers.llm_manager import LLMManager
+from src.managers.planning_manager import PlanningManager
+from src.managers.stream_manager import StreamManager
+from src.utils.map_actions_to_results import map_actions_to_results
+from src.utils.text_utils import clean_text
 
 async def run_agent(
         start_url: str,
         model: str,
-        headless: bool = False,
+        job_id: str,
+        headless: bool = True,
         victims_collection=None,
         session_collection=None,
         max_steps: int = 50,
@@ -23,7 +27,19 @@ async def run_agent(
     stream_manager = StreamManager.get_instance()
     await stream_manager.ensure_server()
     bm = None
+    mongo_client: Optional[AsyncIOMotorClient] = None
+    final_status_payload: Optional[dict] = None
     try:
+        if victims_collection is None or session_collection is None:
+            mongo_uri = os.getenv("MONGODB_URI") or os.getenv("MONGO_DB_URI")
+            if not mongo_uri:
+                raise RuntimeError("MongoDB connection URI not configured")
+            db_name = os.getenv("MONGO_DB_NAME", "ransomware_db")
+            mongo_client = AsyncIOMotorClient(mongo_uri)
+            db = mongo_client[db_name]
+            victims_collection = db['victims']
+            session_collection = db['session']
+
         print(f"Starting at: {start_url}")
         print("Starting agent...")
 
@@ -32,7 +48,8 @@ async def run_agent(
 
         bm = BrowserManager(
             start_url,
-            headless=headless,
+            job_id=job_id,
+            headless=True,
             victims_collection=victims_collection,
             session_collection=session_collection,
             llm=llm
@@ -71,6 +88,7 @@ async def run_agent(
             sensing_context = bm.sensingcontext
             if sensing_context:
                 await stream_manager.push_event(
+                    job_id,
                     "sensing",
                     {
                         "step": steps,
@@ -93,6 +111,7 @@ async def run_agent(
             plan = await pm.plan(context, llm)
             print(f"\nStep {steps}: Planned actions: {plan}")
             await stream_manager.push_event(
+                job_id,
                 "planning",
                 {
                     "step": steps,
@@ -119,16 +138,19 @@ async def run_agent(
                 mapped_action_result = map_actions_to_results(actions, results, strict=True)
 
                 # Add the actions to the history context
-                pm.update_history(bm._page.url, mapped_action_result)
+                pm.update_history(steps, mapped_action_result)
                 await stream_manager.push_event(
+                    job_id,
                     "execution",
                     {
-                        "mappedResults": mapped_action_result,
+                        "step": steps,
+                        "actions": mapped_action_result,
                     },
                 )
             except Exception as e:
                 print(f"Action execution failed: {e}")
                 await stream_manager.push_event(
+                    job_id,
                     "execution_error",
                     {
                         "step": steps,
@@ -137,28 +159,32 @@ async def run_agent(
                 )
                 break
 
-        await bm.exit()
         print("Agent finished.")
         if stop_signal and stop_signal.is_set():
             final_status = "stopped"
         else:
             final_status = "complete"
-        await stream_manager.push_event(
-            "agent_status",
-            {
-                "status": final_status,
-                "stepsRan": steps,
-            },
-        )
+        final_status_payload = {
+            "status": final_status,
+            "stepsRan": steps,
+        }
         return {"status": final_status, "steps_ran": steps}
     except Exception as e:
-        await stream_manager.push_event(
-            "agent_status",
-            {
-                "status": "failed",
-                "error": str(e),
-            },
-        )
-        if bm is not None:
-            await bm.exit()
+        final_status_payload = {
+            "status": "failed",
+            "error": str(e),
+        }
         print(f"Agent Fail with {e}")
+    finally:
+        if bm is not None:
+            try:
+                await bm.exit()
+            except Exception as exit_error:  # pylint: disable=broad-except
+                print(f"Error during browser manager shutdown: {exit_error}")
+        if final_status_payload is not None:
+            try:
+                await stream_manager.push_event(job_id, "agent_status", final_status_payload)
+            except Exception as event_error:  # pylint: disable=broad-except
+                print(f"Failed to push final status event: {event_error}")
+        if mongo_client is not None:
+            mongo_client.close()

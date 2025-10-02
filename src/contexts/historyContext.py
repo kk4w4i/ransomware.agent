@@ -1,7 +1,8 @@
-from dataclasses import dataclass
-from typing import Dict, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List
+
 
 @dataclass
 class HistoryContext:
-    locationURL: str = ""
-    action_mapped_results: Dict[str, Optional[bool]] = None
+    step: int
+    actionsWithResults: List[Dict[str, Any]] = field(default_factory=list)

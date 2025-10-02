@@ -1,16 +1,20 @@
-from flask import Flask, request, jsonify
+import uuid
+from flask import Flask, request, jsonify, session
 from flask_cors import CORS
 import motor.motor_asyncio  # type: ignore
 import os
 import asyncio
 import threading
-from typing import Optional
+from typing import Dict
+
 
 from src.agent import run_agent
 from src.eval import eval_group
 from src.managers.stream_manager import StreamManager
+from src.managers.vector_store_manager import VectorStoreManager
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "change-me")
 
 raw_origins = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000")
 allowed_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
@@ -35,31 +39,34 @@ db = client['ransomware_db']
 victims_collection = db['victims']
 session_collection = db['session']
 
-_agent_control: dict[str, Optional[object]] = {
-    "thread": None,
-    "stop_event": None,
-}
+_agent_control: Dict[str, Dict[str, object]] = {}
 
 @app.route('/run_agent', methods=['POST'])
 def agent_endpoint():
     data = request.json or {}
     start_url = data.get('start_url')
-    headless = bool(data.get('headless', False))
     model = data.get('model', 'deepseek-chat')
     max_steps = data.get('max_steps', 50)
     if not start_url:
         return jsonify({"error": "Missing start_url"}), 400
     stream_manager = StreamManager.get_instance()
-
-    existing_thread = _agent_control.get("thread")
-    if isinstance(existing_thread, threading.Thread) and existing_thread.is_alive():
-        return jsonify({"error": "Agent already running"}), 409
-
+    headless = bool(data.get('headless', True))
+    job_id = str(uuid.uuid4())
     ready_timeout = float(os.getenv("AGENT_READY_TIMEOUT", "30"))
     ready_event = threading.Event()
-    state: dict[str, object] = {"status": "starting"}
     stop_event = threading.Event()
-    _agent_control["stop_event"] = stop_event
+    state: Dict[str, object] = {"status": "starting"}
+    _agent_control[job_id] = {
+        "thread": None,
+        "stop_event": stop_event,
+        "state": state,
+    }
+
+    jobs = session.get("jobs", [])
+    jobs.append(job_id)
+    session["jobs"] = jobs[-10:]
+    session["current_job_id"] = job_id
+    session.modified = True
 
     def on_ready() -> None:
         state["status"] = "ready"
@@ -69,11 +76,10 @@ def agent_endpoint():
         try:
             result = asyncio.run(
                 run_agent(
-                    start_url,
-                    headless=headless,
-                    victims_collection=victims_collection,
-                    session_collection=session_collection,
+                    start_url=start_url,
                     model=model,
+                    job_id=job_id,
+                    headless=headless,
                     max_steps=max_steps,
                     on_ready=on_ready,
                     stop_signal=stop_event,
@@ -89,41 +95,57 @@ def agent_endpoint():
             if not ready_event.is_set():
                 ready_event.set()
         finally:
-            _agent_control["thread"] = None
-            _agent_control["stop_event"] = None
+            _agent_control.pop(job_id, None)
 
     thread = threading.Thread(target=runner, daemon=True)
     thread.start()
-    _agent_control["thread"] = thread
+    _agent_control[job_id]["thread"] = thread
 
     ready_event.wait(timeout=ready_timeout)
 
     status = state.get("status", "starting")
     if status == "error":
-        return jsonify({"status": "error", "error": state.get("error")}), 500
+        return jsonify({"status": "error", "error": state.get("error"), "jobId": job_id}), 500
 
     if status == "ready":
-        return jsonify({"status": "started", "stream": stream_manager.info()}), 200
+        return jsonify({"status": "started", "jobId": job_id, "stream": stream_manager.info(job_id)}), 200
 
-    return jsonify({"status": status}), 202
+    return jsonify({"status": status, "jobId": job_id}), 202
 
 
 @app.route('/stream/info', methods=['GET'])
 def stream_info():
+    job_id = request.args.get('jobId') or session.get("current_job_id")
     manager = StreamManager.get_instance()
-    return jsonify(manager.info())
+    return jsonify(manager.info(job_id))
 
 
 @app.route('/run_agent/stop', methods=['POST'])
 def stop_agent():
-    thread = _agent_control.get("thread")
-    stop_event = _agent_control.get("stop_event")
+    data = request.get_json(silent=True) or {}
+    job_id = data.get('jobId') or session.get("current_job_id")
+    if not job_id:
+        return jsonify({"error": "Missing jobId"}), 400
 
-    if not isinstance(thread, threading.Thread) or not thread.is_alive() or not isinstance(stop_event, threading.Event):
-        return jsonify({"status": "idle"}), 200
+    entry = _agent_control.get(job_id)
+    if not entry:
+        return jsonify({"status": "idle", "jobId": job_id}), 200
+
+    stop_event = entry.get("stop_event")
+    thread = entry.get("thread")
+
+    if not isinstance(stop_event, threading.Event) or not isinstance(thread, threading.Thread):
+        return jsonify({"status": "idle", "jobId": job_id}), 200
 
     stop_event.set()
-    return jsonify({"status": "stopping"}), 200
+
+    jobs = [jid for jid in session.get("jobs", []) if jid != job_id]
+    session["jobs"] = jobs
+    if session.get("current_job_id") == job_id:
+        session["current_job_id"] = jobs[-1] if jobs else None
+    session.modified = True
+
+    return jsonify({"status": "stopping", "jobId": job_id}), 200
 
 @app.route("/eval_extraction", methods=["POST"])
 def eval_extraction_endpoint():
@@ -143,6 +165,7 @@ def eval_extraction_endpoint():
                 agent_db_name="ransomware_db",
                 live_coll_name="victims",
                 agent_coll_name="victims",
+                fields=data.get("fields"),
             )
         )
         return jsonify(result), 200
@@ -162,6 +185,28 @@ def groups_endpoint():
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "healthy"}), 200
+
+
+@app.route('/victims/deduplicate', methods=['POST'])
+def dedupe_victims():
+    data = request.get_json(silent=True) or {}
+    threshold = float(data.get('threshold', 0.85))
+    search_limit = int(data.get('searchLimit', 25))
+
+    async def run_dedupe():
+        async with VectorStoreManager() as manager:
+            result = await manager.deduplicate_collection(
+                victims_collection,
+                threshold=threshold,
+                search_limit=search_limit,
+            )
+            return result
+
+    try:
+        result = asyncio.run(run_dedupe())
+        return jsonify(result), 200
+    except Exception as exc:  # pylint: disable=broad-except
+        return jsonify({"error": str(exc)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)

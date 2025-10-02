@@ -1,3 +1,5 @@
+from typing import Any, Dict, List
+
 from src.contexts.planningContext import PlanningContext
 from src.contexts.actionContext import ActionContext
 from src.contexts.historyContext import HistoryContext
@@ -5,7 +7,7 @@ from src.managers.llm_manager import LLMManager
 
 class PlanningManager:
     def __init__(self):
-        self.historical_actions = []
+        self.historical_actions: List[HistoryContext] = []
 
     async def build_context(
         self, 
@@ -34,6 +36,6 @@ class PlanningManager:
         plan = await llm.get_llm_plan(str(context.planning_context))
         return plan
 
-    def update_history(self, url: str, action_mapped_results: dict):
-        history = HistoryContext(url, action_mapped_results)
+    def update_history(self, step: int, actions_with_results: List[Dict[str, Any]]) -> None:
+        history = HistoryContext(step=step, actionsWithResults=actions_with_results)
         self.historical_actions.append(history)

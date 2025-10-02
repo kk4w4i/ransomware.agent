@@ -1,23 +1,33 @@
-import importlib
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError # type: ignore
 import asyncio
+import importlib
+import json
 import traceback
 from typing import Optional
+
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError  # type: ignore
 
 from src.contexts.sensingContext import SensingContext
 from src.managers.llm_manager import LLMManager
 from src.utils.text_utils import clean_text
 from src.managers.stream_manager import StreamManager
 
-class BrowserManager:
-    _instance = None
 
-    def __init__(self, start_url: str, headless: bool, llm: LLMManager, victims_collection, session_collection, hf_token: str = None):
+class BrowserManager:
+
+    def __init__(
+        self,
+        start_url: str,
+        job_id: str,
+        headless: bool,
+        llm: LLMManager,
+        victims_collection,
+        session_collection,
+        hf_token: str = None,
+    ):
         if not start_url:
             raise ValueError("Start URL cannot be empty")
-        if BrowserManager._instance:
-            raise RuntimeError("BrowserManager is already running")
         self._start_url = start_url
+        self._job_id = job_id
         self._playwright = None
         self._browser = None
         self._page = None
@@ -30,9 +40,6 @@ class BrowserManager:
             "handle_dialog": "src.actions.handle_dialog",
             "scrape_and_store": "src.actions.scrape_and_store"
         }
-        BrowserManager._instance = self
-        self.victims_collection = None
-        self.session_collection = None
         self.headless = headless
         self.victims_collection = victims_collection
         self.session_collection = session_collection
@@ -55,6 +62,7 @@ class BrowserManager:
                 await self._page.goto(self._start_url)
                 self._stream_manager = StreamManager.get_instance()
                 await self._stream_manager.start_stream(
+                    self._job_id,
                     self._page,
                     metadata={
                         "startUrl": self._start_url,
@@ -100,20 +108,40 @@ class BrowserManager:
                 if name == "scrape_and_store":
                     mod = importlib.import_module(self._actions[name])
                      # scrape_and_store expects page and context_size
-                    result = await mod.run(self._page, self.victims_collection, self.session_collection, self.llm)
-                    print(f"[EXECUTE] Result: {result}")
-                    results.append(result)
+                    raw_result = await mod.run(self._page, self.victims_collection, self.session_collection, self.llm)
                 else:
                     mod = importlib.import_module(self._actions[name])
-                    result = await mod.run(self._page, *args, **kwargs)
-                    print(f"[EXECUTE] Result: {result}")
-                    results.append(result)
+                    raw_result = await mod.run(self._page, *args, **kwargs)
+                success, message = self._format_action_outcome(name, raw_result)
+                print(f"[EXECUTE] Result: {raw_result}")
+                results.append({
+                    "status": "success" if success else "failed",
+                    "message": message,
+                })
             except Exception as e:
                 print(f"[EXECUTE ERROR] Action: {name}, Error: {e}")
                 traceback.print_exc()
-                results.append(None)
+                results.append({
+                    "status": "failed",
+                    "message": f"{type(e).__name__}: {e}",
+                })
         print(f"[EXECUTE] All Results: {results}")
         return results
+
+    def _format_action_outcome(self, name: str, raw_result):
+        """Return a tuple of (success, message) for the action outcome."""
+        if isinstance(raw_result, bool):
+            if raw_result:
+                return True, f"Action '{name}' completed successfully."
+            return False, f"Action '{name}' ran but reported no effect."
+
+        if raw_result is None:
+            return True, f"Action '{name}' executed with no return value."
+
+        if isinstance(raw_result, (list, dict)):
+            return True, f"Action '{name}' completed. Output: {json.dumps(raw_result, default=str)[:500]}"
+
+        return True, f"Action '{name}' completed. Output: {raw_result}"
 
     def chunk_text(self, text, chunk_size, overlap_ratio=0.1):
         chunks = []
@@ -185,7 +213,7 @@ class BrowserManager:
 
     async def exit(self):
         if self._stream_manager is not None:
-            await self._stream_manager.stop_stream()
+            await self._stream_manager.stop_stream(self._job_id)
             self._stream_manager = None
         if self._browser is not None:
             await self._browser.close()
@@ -193,4 +221,3 @@ class BrowserManager:
         if self._playwright is not None:
             await self._playwright.stop()
             self._playwright = None
-        BrowserManager._instance = None

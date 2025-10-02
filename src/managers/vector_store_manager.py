@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Set
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -130,6 +130,91 @@ class VectorStoreManager:
             return []
         emb = self.embedder.generate_embedding(searchable_text)
         return await self.vector_search(collection, emb, limit=limit, threshold=threshold)
+
+    async def _ensure_embedding(self, collection, doc: Dict[str, Any]) -> Optional[List[float]]:
+        embedding = doc.get('embedding')
+        if embedding and isinstance(embedding, list):
+            return embedding
+
+        searchable_text = doc.get('searchable_text') or self.create_searchable_text(doc)
+        if not searchable_text.strip():
+            return None
+
+        embedding = self.embedder.generate_embedding(searchable_text)
+        try:
+            await collection.update_one(
+                {'_id': doc['_id']},
+                {'$set': {'embedding': embedding, 'searchable_text': searchable_text}},
+            )
+        except Exception as update_error:  # pylint: disable=broad-except
+            logger.debug("Failed to persist embedding during dedupe: %s", update_error)
+        return embedding
+
+    async def deduplicate_collection(
+        self,
+        collection,
+        threshold: float = 0.85,
+        search_limit: int = 25,
+    ) -> Dict[str, Any]:
+        processed: Set[Any] = set()
+        deleted_ids: List[str] = []
+
+        cursor = collection.find(
+            {},
+            projection={
+                '_id': 1,
+                'embedding': 1,
+                'searchable_text': 1,
+                'victimCompany': 1,
+                'industry': 1,
+                'countryOfCompany': 1,
+                'ransomwareGroup': 1,
+                'description': 1,
+            },
+        )
+
+        async for doc in cursor:
+            doc_id = doc.get('_id')
+            if doc_id in processed:
+                continue
+
+            embedding = await self._ensure_embedding(collection, doc)
+            if not embedding:
+                processed.add(doc_id)
+                continue
+
+            similar = await self.vector_search(
+                collection,
+                embedding,
+                limit=search_limit,
+                threshold=threshold,
+            )
+
+            duplicates = []
+            for match in similar:
+                match_id = match.get('_id')
+                if not match_id or match_id == doc_id or match_id in processed:
+                    continue
+                score = float(match.get('score', 0.0) or 0.0)
+                if score >= threshold:
+                    duplicates.append(match_id)
+
+            if duplicates:
+                try:
+                    await collection.delete_many({'_id': {'$in': duplicates}})
+                except Exception as delete_error:  # pylint: disable=broad-except
+                    logger.error("Failed to delete duplicate victims: %s", delete_error)
+                else:
+                    deleted_ids.extend(str(dup_id) for dup_id in duplicates)
+                    processed.update(duplicates)
+
+            processed.add(doc_id)
+
+        return {
+            'deletedCount': len(deleted_ids),
+            'deletedIds': deleted_ids,
+            'threshold': threshold,
+        }
 
     async def store_entry_with_embedding(self, collection, entry: Dict[str, Any],
                                          similarity_threshold: float = 0.85) -> Dict[str, Any]:

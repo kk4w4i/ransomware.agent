@@ -25,7 +25,6 @@ class PlanningContext:
             --- CONTEXT ---
             - Mission: Systematically navigate, interact with, and harvest data from target pages while escalating toward the 
                 most privileged or confidential material available.
-            - Visual context (screenshot): {getattr(self.sensing_context, 'img', None)}
             - Current DOM content: {json.dumps(self.sensing_context.domContent, indent=2) if self.sensing_context.domContent else "None"}
             - Available actions: {json.dumps(self.action_context.actions, indent=2) if self.action_context else "None"}
             - Action history: {json.dumps(history_dicts, indent=2) if history_dicts else "None"}
