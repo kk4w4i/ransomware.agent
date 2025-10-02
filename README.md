@@ -4,7 +4,7 @@
 
 **ransomeware.agent** is my ([kk4w4i](https://github.com/kk4w4i)) thesis project focused on intelligent monitoring of public name-and-shame ransomware sites hosted on the TOR network. 
 
-The aim is to support forensics and investigators by automating the monitoring process against to volatile dark web resources.
+The aim is to support forensics and investigators by improving the robustness of the automated monitoring process against the volatile nature of to the "name-and-shame" extortion pages.
 
 Inspired by existing efforts like [ransomware.live](https://ransomware.live) and frameworks like Agent-E by emergence.ai, this project explores agentic workflows for ransomware site analysis.
 
