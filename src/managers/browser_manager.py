@@ -107,16 +107,18 @@ class BrowserManager:
                 # Handle special logic for 'scrape_and_store'
                 if name == "scrape_and_store":
                     mod = importlib.import_module(self._actions[name])
-                     # scrape_and_store expects page and context_size
+                    # scrape_and_store expects page and context_size
                     raw_result = await mod.run(self._page, self.victims_collection, self.session_collection, self.llm)
                 else:
                     mod = importlib.import_module(self._actions[name])
                     raw_result = await mod.run(self._page, *args, **kwargs)
-                success, message = self._format_action_outcome(name, raw_result)
+
+                success, message, payload = self._format_action_outcome(name, raw_result)
                 print(f"[EXECUTE] Result: {raw_result}")
                 results.append({
                     "status": "success" if success else "failed",
                     "message": message,
+                    "payload": payload,
                 })
             except Exception as e:
                 print(f"[EXECUTE ERROR] Action: {name}, Error: {e}")
@@ -124,24 +126,37 @@ class BrowserManager:
                 results.append({
                     "status": "failed",
                     "message": f"{type(e).__name__}: {e}",
+                    "payload": None,
                 })
         print(f"[EXECUTE] All Results: {results}")
         return results
 
     def _format_action_outcome(self, name: str, raw_result):
-        """Return a tuple of (success, message) for the action outcome."""
+        """Return a tuple of (success, message, payload) for the action outcome."""
+        if name == "scrape_and_store" and isinstance(raw_result, dict):
+            total = raw_result.get('totalEntries')
+            victims = raw_result.get('victimNames') or []
+            if total:
+                victim_preview = ", ".join(victims[:5])
+                if len(victims) > 5:
+                    victim_preview += ", …"
+                message = f"Stored {total} victim entries: {victim_preview}" if victim_preview else f"Stored {total} victim entries."
+            else:
+                message = "Scraped page; no new victims found."
+            return True, message, raw_result
+
         if isinstance(raw_result, bool):
             if raw_result:
-                return True, f"Action '{name}' completed successfully."
-            return False, f"Action '{name}' ran but reported no effect."
+                return True, f"Action '{name}' completed successfully.", raw_result
+            return False, f"Action '{name}' ran but reported no effect.", raw_result
 
         if raw_result is None:
-            return True, f"Action '{name}' executed with no return value."
+            return True, f"Action '{name}' executed with no return value.", raw_result
 
         if isinstance(raw_result, (list, dict)):
-            return True, f"Action '{name}' completed. Output: {json.dumps(raw_result, default=str)[:500]}"
+            return True, f"Action '{name}' completed. Output: {json.dumps(raw_result, default=str)[:500]}", raw_result
 
-        return True, f"Action '{name}' completed. Output: {raw_result}"
+        return True, f"Action '{name}' completed. Output: {raw_result}", raw_result
 
     def chunk_text(self, text, chunk_size, overlap_ratio=0.1):
         chunks = []

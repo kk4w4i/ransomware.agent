@@ -24,6 +24,7 @@ def map_actions_to_results(
                 "results": {
                     "status": status,
                     "message": message,
+                    "payload": outcome.get("payload"),
                 },
             }
         )

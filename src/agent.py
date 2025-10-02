@@ -29,6 +29,7 @@ async def run_agent(
     bm = None
     mongo_client: Optional[AsyncIOMotorClient] = None
     final_status_payload: Optional[dict] = None
+    exhausted_navigation = False
     try:
         if victims_collection is None or session_collection is None:
             mongo_uri = os.getenv("MONGODB_URI") or os.getenv("MONGO_DB_URI")
@@ -118,8 +119,16 @@ async def run_agent(
                     "plan": plan,
                 },
             )
-            if not plan:
-                print("No more actions planned. Stopping agent loop.")
+            if isinstance(plan, str):
+                plan = ast.literal_eval(plan)
+            actions = plan if isinstance(plan, list) else []
+            pm.register_plan(actions)
+            if not actions:
+                if pm.should_stop():
+                    print("Heuristic stop triggered: planner has no further actions and no new data available.")
+                    exhausted_navigation = True
+                else:
+                    print("Planner returned no actions. Stopping agent loop.")
                 break
 
             #####################################################
@@ -129,9 +138,6 @@ async def run_agent(
                 print("Stop signal received before execution; exiting loop.")
                 break
             try:
-                if isinstance(plan, str):
-                    plan = ast.literal_eval(plan)
-                actions = plan if isinstance(plan, list) else []
                 print(actions)
                 results = await bm.execute(actions)
 
@@ -167,6 +173,7 @@ async def run_agent(
         final_status_payload = {
             "status": final_status,
             "stepsRan": steps,
+            "exhaustedNavigation": exhausted_navigation,
         }
         return {"status": final_status, "steps_ran": steps}
     except Exception as e:

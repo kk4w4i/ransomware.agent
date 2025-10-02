@@ -121,6 +121,15 @@ actions = {
             "action": "scrape_and_store"
         },
         "note": "This action automatically receives victims_collection, session_collection, and llm from the executor context"
+    },
+    "go_back": {
+        "description": "Navigate back to the previous entry in browser history and wait for the page to load. Useful for reversing a navigation step or returning to a results page.",
+        "action_structure": {
+            "action": "go_back"
+        },
+        "example": {
+            "action": "go_back"
+        }
     }
 }
 

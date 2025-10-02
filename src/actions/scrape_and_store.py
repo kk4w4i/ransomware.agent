@@ -176,5 +176,14 @@ async def run(page, victims_collection, sessions_collection, llm: LLMManager, si
         print(f"\n✅ Scrape complete!")
         print(f"📊 Total entries processed: {total_entries}")
         print(f"🔍 Vector similarity threshold used: {similarity_threshold}")
-        
-        return True if entries else False
+
+        victim_names = [entry.get('victimCompany') for entry in entries if entry.get('victimCompany')]
+
+        return {
+            'stored': bool(entries),
+            'totalEntries': total_entries,
+            'victimNames': victim_names,
+            'entries': entries,
+            'similarityThreshold': similarity_threshold,
+            'skipped': not entries,
+        }
