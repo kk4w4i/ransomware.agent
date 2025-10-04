@@ -114,7 +114,6 @@ class BrowserManager:
                     raw_result = await mod.run(self._page, *args, **kwargs)
 
                 success, message, payload = self._format_action_outcome(name, raw_result)
-                print(f"[EXECUTE] Result: {raw_result}")
                 results.append({
                     "status": "success" if success else "failed",
                     "message": message,
@@ -171,9 +170,13 @@ class BrowserManager:
 
     async def summarize_chunk(self, chunk, chunk_idx, total_chunks):
         prompt = (
-            f"You are helping summarize website source code for a vision-assisted autonomous web agent.\n"
-            f"This is chunk {chunk_idx+1} of {total_chunks} of the raw HTML/visible content. "
-            f"Provide a concise expert summary of what this chunk presents to the user (extract structure, main data, sections, hidden links/forms, etc)."
+            f"You are analyzing website DOM for a vision-assisted automation agent.\n"
+            f"Chunk {chunk_idx+1}/{total_chunks}: Return a concise summary that emphasizes actionable selectors.\n"
+            "When referencing selectors, prefer explicit element+class/id combos (e.g. 'li.pagination-item > a[data-page]') instead of vague pseudo-classes like :last-child unless they map exactly to the markup described.\n"
+            "Identify key interactive elements (links, buttons, inputs, forms), their visible text, attributes (id, name, role, aria-label), and CSS classes, mentioning parent containers (e.g., list items, sections).\n"
+            "Highlight tables, lists, or data-rich sections with structural hints (rows, headers) and describe how items are grouped.\n"
+            "Mention hidden or collapsible elements if detectable.\n"
+            "Keep responses short and focused on details that help build robust selectors that match the actual hierarchy."
         )
         summary = await self.llm.llm_request(chunk, system=prompt)
         return summary
@@ -185,10 +188,22 @@ class BrowserManager:
         await self._page.wait_for_load_state('load')
 
         html_content = await self._page.content()
-
         html_content = await clean_text(html_content)
 
         print(f"👁️ Sensed {len(html_content)} characters of visible text.")
+
+        screenshot_bytes = None
+        try:
+            screenshot_bytes = await self._page.screenshot(full_page=True, type="jpeg")
+        except Exception as screenshot_err:  # pylint: disable=broad-except
+            print(f"⚠️ Screenshot capture failed: {screenshot_err}")
+
+        image_description = None
+        if screenshot_bytes is not None:
+            try:
+                image_description = await self.llm.describe_image(screenshot_bytes, mime_type="image/jpeg")
+            except Exception as describe_err:  # pylint: disable=broad-except
+                print(f"⚠️ Image description failed: {describe_err}")
 
         max_length = self.llm.context_size * 2
 
@@ -207,8 +222,8 @@ class BrowserManager:
             merged_summary_text = "\n\n".join(summaries)
             print("Merging chunk summaries with LLM...")
             final_prompt = (
-                "Given the following webpage chunk summaries, create a single coherent, structured, "
-                "high-level natural language description for what the page presents, including key data and visual structures, for a web automation agent:\n\n"
+                "Using the following chunk summaries, create a single structured description that highlights actionable selectors, "
+                "key interactive elements, and important data regions. Provide enough detail to craft reliable selectors (ids, classes, visible text, roles) and mention parent containers when relevant. Avoid pseudo-classes unless the markup explicitly supports them.\n\n"
                 f"{merged_summary_text}"
             )
             description = await self.llm.llm_request(merged_summary_text, system=final_prompt)
@@ -222,6 +237,7 @@ class BrowserManager:
         self.sensingcontext = SensingContext(
             url=url,
             domContent=dom_content,
+            imageDescription=image_description,
         )
         return self.sensingcontext
 

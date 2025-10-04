@@ -20,9 +20,10 @@ async def run_agent(
         headless: bool = True,
         victims_collection=None,
         session_collection=None,
-        max_steps: int = 50,
+        max_steps: Optional[int] = 50,
         on_ready: Optional[Callable[[], None]] = None,
         stop_signal: Optional[Event] = None,
+        provider: Optional[str] = None,
     ):
     stream_manager = StreamManager.get_instance()
     await stream_manager.ensure_server()
@@ -44,7 +45,7 @@ async def run_agent(
         print(f"Starting at: {start_url}")
         print("Starting agent...")
 
-        llm = LLMManager(model=model)
+        llm = LLMManager(model=model, provider=provider)
         print(f"Using model: {llm.model} with context window: {llm.context_size}")
 
         bm = BrowserManager(
@@ -65,9 +66,12 @@ async def run_agent(
         pm = PlanningManager()
 
         steps = 0
-        while steps < max_steps:
+        while True:
             if stop_signal and stop_signal.is_set():
                 print("Stop signal received before sensing; exiting loop.")
+                break
+            if max_steps is not None and steps >= max_steps:
+                print("Reached configured max steps. Stopping agent loop.")
                 break
             steps += 1
 
@@ -117,12 +121,17 @@ async def run_agent(
                 {
                     "step": steps,
                     "plan": plan,
+                    "context": context.planning_context,
                 },
             )
             if isinstance(plan, str):
                 plan = ast.literal_eval(plan)
             actions = plan if isinstance(plan, list) else []
-            pm.register_plan(actions)
+            stop_requested = pm.register_plan(actions)
+            if stop_requested:
+                print("Planner explicitly requested stop. Ending agent loop.")
+                exhausted_navigation = True
+                break
             if not actions:
                 if pm.should_stop():
                     print("Heuristic stop triggered: planner has no further actions and no new data available.")

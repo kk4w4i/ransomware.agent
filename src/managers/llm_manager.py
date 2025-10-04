@@ -1,6 +1,8 @@
+import base64
 import os
 import asyncio
 import functools
+from typing import Optional
 import httpx
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -12,6 +14,9 @@ class BaseProvider:
 
     async def generate(self, prompt: str, system: str = "You are a helpful assistant") -> str:
         raise NotImplementedError
+
+    async def describe_image(self, image_bytes: bytes, mime_type: str, prompt: str) -> str:
+        raise NotImplementedError("Image description not supported for this provider")
 
 
 class DeepSeekProvider(BaseProvider):
@@ -48,6 +53,9 @@ class DeepSeekProvider(BaseProvider):
             except httpx.HTTPStatusError:
                 raise
 
+    async def describe_image(self, image_bytes: bytes, mime_type: str, prompt: str) -> str:
+        raise NotImplementedError("DeepSeek provider does not support image description")
+
 
 class GeminiProvider(BaseProvider):
     def __init__(self, model: str, api_key: str):
@@ -69,6 +77,31 @@ class GeminiProvider(BaseProvider):
     async def generate(self, prompt: str, system: str = "You are a helpful assistant") -> str:
         loop = asyncio.get_running_loop()
         func = functools.partial(self._generate_sync, prompt, system)
+        return await loop.run_in_executor(None, func)
+
+    def _describe_image_sync(self, image_bytes: bytes, mime_type: str, prompt: str) -> str:
+        self._ensure_config()
+        model = genai.GenerativeModel(self.model)
+        inline_data = {
+            "mime_type": mime_type or "image/png",
+            "data": base64.b64encode(image_bytes).decode("ascii"),
+        }
+        response = model.generate_content(
+            [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": prompt},
+                        {"inline_data": inline_data},
+                    ],
+                }
+            ]
+        )
+        return (response.text or "").strip()
+
+    async def describe_image(self, image_bytes: bytes, mime_type: str, prompt: str) -> str:
+        loop = asyncio.get_running_loop()
+        func = functools.partial(self._describe_image_sync, image_bytes, mime_type, prompt)
         return await loop.run_in_executor(None, func)
 
 
@@ -132,10 +165,23 @@ class LLMManager:
             "DEEPSEEK_API_KEY": os.getenv("DEEPSEEK_API_KEY"),
             "GOOGLE_API_KEY": os.getenv("GOOGLE_API_KEY"),
         }
+        self.env = env
         self.provider = ProviderFactory.create(inferred, model, env)
 
         # context size
         self.context_size = int(meta.get("context_size", default_context_size))
+
+        self.vision_provider: Optional[BaseProvider] = None
+        if isinstance(self.provider, GeminiProvider):
+            self.vision_provider = self.provider
+        else:
+            vision_model = os.getenv("VISION_MODEL", "gemini-2.5-flash")
+            google_key = env.get("GOOGLE_API_KEY")
+            if google_key and vision_model:
+                try:
+                    self.vision_provider = GeminiProvider(model=vision_model, api_key=google_key)
+                except Exception:  # pylint: disable=broad-except
+                    self.vision_provider = None
 
     @staticmethod
     def clean_llm_json(s) -> str:
@@ -160,3 +206,19 @@ class LLMManager:
     async def get_formatted_json(self, prompt: str | None = None) -> str:
         prompt = prompt or "Format the following data as a well-structured JSON object:"
         return self.clean_llm_json(await self.llm_request(prompt))
+
+    async def describe_image(self, image_bytes: bytes, mime_type: str = "image/png") -> str:
+        prompt = (
+            "Provide a concise, high-level description of this webpage screenshot. Identify layout, key sections, "
+            "prominent text, buttons, forms, tables, and any notable visual cues that would help an automation agent "
+            "understand the current state."
+        )
+        provider = self.vision_provider or self.provider
+        try:
+            return await provider.describe_image(image_bytes, mime_type, prompt)
+        except NotImplementedError:
+            if provider is not self.provider and provider is not None:
+                return "Image description unavailable for the configured vision model."
+            return "Image description unavailable for the current model."
+        except Exception as exc:  # pylint: disable=broad-except
+            return f"Image description failed: {exc}"

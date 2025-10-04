@@ -1,3 +1,5 @@
+import asyncio
+import json
 import os
 import re
 from datetime import datetime
@@ -5,6 +7,7 @@ from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import requests
 from motor.motor_asyncio import AsyncIOMotorClient  # type: ignore
 
 from src.managers.vector_store_manager import LocalEmbeddings
@@ -23,6 +26,7 @@ FIELD_MAP = {
     "country": ("country", "countryOfCompany"),
     "description": ("description", "description"),
     "discovered": ("discovered", "discovered"),
+    "industry": {"activity", "industry"}
 }
 
 DEFAULT_EVAL_FIELDS = [
@@ -31,6 +35,7 @@ DEFAULT_EVAL_FIELDS = [
     "domain",
     "country",
     "description",
+    "industry"
 ]
 
 ATTACK_DATE_FORMATS = [
@@ -170,11 +175,16 @@ async def eval_group(
     live_coll = client[live_db_name][live_coll_name]
     agent_coll = client[agent_db_name][agent_coll_name]
 
+    await import_group_victims(group_name, live_coll)
+
+    live_group_name = await _best_group_name(group_name, live_coll, "group")
+    agent_group_name = await _best_group_name(group_name, agent_coll, "ransomwareGroup")
+
     live_docs = await live_coll.find({
-        "group": {"$regex": f"^{re.escape(group_name)}$", "$options": "i"}
+        "group": {"$regex": f"^{re.escape(live_group_name)}$", "$options": "i"}
     }).to_list(length=10000)
     agent_docs = await agent_coll.find({
-        "ransomwareGroup": {"$regex": f"^{re.escape(group_name)}$", "$options": "i"}
+        "ransomwareGroup": {"$regex": f"^{re.escape(agent_group_name)}$", "$options": "i"}
     }).to_list(length=10000)
 
     live_victim_map: Dict[str, Dict[str, Any]] = {}
@@ -188,7 +198,11 @@ async def eval_group(
         live_victim_profiles.append((live_name, _get_embedding(live_name), live_doc))
 
     result = {
-        "group": group_name,
+        "groupRequested": group_name,
+        "groupMatched": {
+            "live": live_group_name,
+            "agent": agent_group_name,
+        },
         "counts": {"live_docs": len(live_docs), "agent_docs": len(agent_docs)},
     }
 
@@ -253,7 +267,7 @@ async def eval_group(
             live_val = live_doc.get(live_k)
             agent_val = agent_doc.get(agent_k)
             
-            if canon in ("victim", "group", "description"):
+            if canon in ("victim", "group", "description", "industry"):
                 ln = _norm_text(live_val)
                 an = _norm_text(agent_val)
                 exact = 1.0 if (ln and an and ln == an) else 0.0
@@ -359,3 +373,89 @@ async def eval_group(
     result["field_aggregate_scores"] = field_aggregate_scores
 
     return result
+
+
+async def import_group_victims(
+    group_name: str,
+    collection,
+    save_file: bool = False,
+    dedupe_fields: Tuple[str, ...] = ("group", "victim", "domain"),
+) -> None:
+    data = await _fetch_group_victims(group_name)
+
+    if not data:
+        return
+
+    if save_file:
+        filename = f"{group_name}_victims.json"
+        with open(filename, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+        print(f"Saved ransomware.live data to {os.path.abspath(filename)}")
+
+    if isinstance(data, dict):
+        docs = [data]
+    else:
+        docs = [doc for doc in data if isinstance(doc, dict)]
+
+    if not docs:
+        return
+
+    uniques = set()
+    new_docs: List[Dict[str, Any]] = []
+
+    for doc in docs:
+        key_values = tuple((field, doc.get(field)) for field in dedupe_fields if doc.get(field) is not None)
+        if not key_values:
+            key = hash(json.dumps(doc, sort_keys=True))
+        else:
+            key = tuple(key_values)
+
+        if key in uniques:
+            continue
+
+        filter_query = {field: doc.get(field) for field in dedupe_fields if doc.get(field) is not None}
+        if filter_query:
+            existing = await collection.find_one(filter_query)
+            if existing:
+                continue
+
+        new_docs.append(doc)
+        uniques.add(key)
+
+    if new_docs:
+        await collection.insert_many(new_docs)
+        print(f"Inserted {len(new_docs)} ransomware.live victims for group '{group_name}' into {collection.name}")
+
+
+async def _fetch_group_victims(group_name: str) -> Any:
+    base_url = "https://api.ransomware.live/v2/groupvictims"
+    url = f"{base_url}/{group_name}"
+    loop = asyncio.get_running_loop()
+
+    def _request():
+        response = requests.get(url, timeout=60)
+        response.raise_for_status()
+        return response.json()
+
+    return await loop.run_in_executor(None, _request)
+
+
+async def _best_group_name(target: str, collection, field: str) -> str:
+    try:
+        names = await collection.distinct(field)
+    except Exception:  # pylint: disable=broad-except
+        names = []
+
+    target_norm = _norm_text(target) or target
+    best_name = target
+    best_score = -1.0
+
+    for name in names:
+        if not name:
+            continue
+        score = _soft_ratio(target_norm, _norm_text(name))
+        if score > best_score:
+            best_score = score
+            best_name = name
+
+    return best_name

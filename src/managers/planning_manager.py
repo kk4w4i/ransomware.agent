@@ -42,8 +42,7 @@ class PlanningManager:
         return plan
 
     def update_history(self, step: int, actions_with_results: List[Dict[str, Any]]) -> None:
-        history = HistoryContext(step=step, actionsWithResults=actions_with_results)
-        self.historical_actions.append(history)
+        filtered_actions = []
 
         for item in actions_with_results:
             action = item.get("action", {})
@@ -68,11 +67,38 @@ class PlanningManager:
                     "timestampStep": step,
                 }
 
-    def register_plan(self, planned_actions: List[Dict[str, Any]]) -> None:
+                filtered_actions.append(
+                    {
+                        "action": action,
+                        "results": {
+                            "status": results.get("status"),
+                            "message": results.get("message"),
+                            "victimNames": victim_names,
+                            "totalEntries": total_entries,
+                        },
+                    }
+                )
+            else:
+                filtered_actions.append(item)
+
+        history = HistoryContext(step=step, actionsWithResults=filtered_actions)
+        self.historical_actions.append(history)
+
+    def register_plan(self, planned_actions: List[Dict[str, Any]]) -> bool:
+        should_stop = False
         if planned_actions:
-            self.consecutive_noop_plans = 0
+            for action in planned_actions:
+                if isinstance(action, dict):
+                    if str(action.get("action", "")).lower() == "stop" or action.get("stop") is True:
+                        should_stop = True
+                        break
+            if should_stop:
+                self.consecutive_noop_plans += 1
+            else:
+                self.consecutive_noop_plans = 0
         else:
             self.consecutive_noop_plans += 1
+        return should_stop
 
     def should_stop(self) -> bool:
         if self.consecutive_noop_plans >= 2:

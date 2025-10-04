@@ -5,7 +5,7 @@ import motor.motor_asyncio  # type: ignore
 import os
 import asyncio
 import threading
-from typing import Dict
+from typing import Dict, Optional
 
 
 from src.agent import run_agent
@@ -46,7 +46,25 @@ def agent_endpoint():
     data = request.json or {}
     start_url = data.get('start_url')
     model = data.get('model', 'deepseek-chat')
-    max_steps = data.get('max_steps', 50)
+    provider = data.get('provider')
+
+    raw_max_steps = data.get('max_steps', 50)
+    if isinstance(raw_max_steps, str):
+        if raw_max_steps.strip().lower() == 'auto':
+            max_steps: Optional[int] = None
+        else:
+            try:
+                max_steps = int(raw_max_steps)
+            except ValueError:
+                return jsonify({"error": "max_steps must be an integer or 'auto'"}), 400
+    else:
+        try:
+            max_steps = int(raw_max_steps)
+        except (TypeError, ValueError):
+            return jsonify({"error": "max_steps must be an integer or 'auto'"}), 400
+
+    if max_steps is not None and max_steps <= 0:
+        max_steps = None
     if not start_url:
         return jsonify({"error": "Missing start_url"}), 400
     stream_manager = StreamManager.get_instance()
@@ -80,6 +98,7 @@ def agent_endpoint():
                     model=model,
                     job_id=job_id,
                     headless=headless,
+                    provider=provider,
                     max_steps=max_steps,
                     on_ready=on_ready,
                     stop_signal=stop_event,
@@ -98,8 +117,10 @@ def agent_endpoint():
             _agent_control.pop(job_id, None)
 
     thread = threading.Thread(target=runner, daemon=True)
+    entry = _agent_control.get(job_id)
+    if entry is not None:
+        entry["thread"] = thread
     thread.start()
-    _agent_control[job_id]["thread"] = thread
 
     ready_event.wait(timeout=ready_timeout)
 
