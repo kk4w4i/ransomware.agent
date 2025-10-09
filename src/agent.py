@@ -84,7 +84,6 @@ async def run_agent(
             # --- Check session before planning ---
             page = bm._page
             full_text = await page.content()
-            full_text = await clean_text(full_text)
             url = str(page.url)
             text_hash = hashlib.sha256(full_text.encode('utf-8')).hexdigest()
             existing = await session_collection.find_one({'url': url, 'text_hash': text_hash})

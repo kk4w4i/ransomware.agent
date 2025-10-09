@@ -5,6 +5,7 @@ import hashlib
 from src.managers.llm_manager import LLMManager
 from src.managers.vector_store_manager import VectorStoreManager
 from src.utils.text_utils import clean_text
+import copy
 
 # -------- Chunking with 10% Overlap --------
 def chunk_text(text, size):
@@ -123,12 +124,14 @@ async def run(page, victims_collection, sessions_collection, llm: LLMManager, si
         await vector_store.setup_vector_index(victims_collection)
         
         full_text = await page.content()
+        text_to_hash = copy.copy(full_text)
+        
         full_text = await clean_text(full_text)
         print(f"📝 Grabbed {len(full_text)} characters of visible text.")
 
         # --- Session Hashing ---
         url = str(page.url)
-        text_hash = hashlib.sha256(full_text.encode('utf-8')).hexdigest()
+        text_hash = hashlib.sha256(text_to_hash.encode('utf-8')).hexdigest()
 
         existing = await sessions_collection.find_one({'url': url, 'text_hash': text_hash})
         if existing:
