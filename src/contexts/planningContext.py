@@ -50,7 +50,7 @@ class PlanningContext:
             - Scraping progress: {_dump(scrape_info)}
 
             --- RULES & STRATEGY ---
-            - Behave like an adversarial penetration tester, using all available actions flexibly. **After each action that could 
+            - Exhaustively navigate around to find scrape-worthy information typically in the form of a 'leak' or 'news', using all available actions flexibly. **After each action that could 
                 change the DOM (e.g., clicking, entering text, submitting forms, running commands), immediately pause and return; 
                 wait for the actual result before planning further. 
             - Avoid clicking on Downloadable Links, and avoid Signing in / Registering to the DLS pages.
