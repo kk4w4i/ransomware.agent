@@ -173,8 +173,9 @@ class BrowserManager:
             f"You are analyzing website DOM for a vision-assisted automation agent.\n"
             f"Chunk {chunk_idx+1}/{total_chunks}: Return a concise summary that emphasizes actionable selectors.\n"
             "When referencing selectors, prefer explicit element+class/id combos (e.g. 'li.pagination-item > a[data-page]') instead of vague pseudo-classes like :last-child unless they map exactly to the markup described.\n"
-            "Identify key interactive elements (links, buttons, inputs, forms), their visible text, attributes (id, name, role, aria-label), and CSS classes, mentioning parent containers (e.g., list items, sections).\n"
+            "Identify all interactive elements (links, buttons, inputs, forms), their visible text, attributes (id, name, role, aria-label), and CSS classes, mentioning parent containers (e.g., list items, sections).\n"
             "Highlight tables, lists, or data-rich sections with structural hints (rows, headers) and describe how items are grouped.\n"
+            "Ignore Downloadable links, sign up / login buttons"
             "Mention hidden or collapsible elements if detectable.\n"
             "Keep responses short and focused on details that help build robust selectors that match the actual hierarchy."
         )
