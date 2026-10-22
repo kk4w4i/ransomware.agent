@@ -8,6 +8,7 @@ The aim is to support forensics and investigators by improving the robustness of
 
 Inspired by existing efforts like [ransomware.live](https://ransomware.live) and AI agentic frameworks like Agent-E by emergence.ai, this project explores agentic web navigation workflows for DLS analysis.
 
+> Read the full thesis: [Ransomware.agent: AI-powered Webscraping for Textual Data Extraction from Ransomware Data Leak Sites (PDF)](docs/thesis.pdf)  
 > For contact or questions, let's connect on [LinkedIn](https://www.linkedin.com/in/kintarokawai/).
 
 ***
