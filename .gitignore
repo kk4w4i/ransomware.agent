@@ -2,3 +2,4 @@
 *venv
 listofsites.txt
 __pycache__/
+.DS_Store
