@@ -22,11 +22,11 @@ Inspired by existing efforts like [ransomware.live](https://ransomware.live) and
 
 ## Results
 
-The agent was evaluated against [ransomware.live](https://ransomware.live)'s scraper and parser workflow across ransomware data leak sites.
+The agent was benchmarked against [ransomware.live](https://ransomware.live)'s hand-written parsers on five ransomware groups: Akira, DragonForce, Qilin, Play and The Gentlemen. Field accuracy is the cosine similarity between `all-MiniLM-L6-v2` sentence embeddings of the agent's output and ransomware.live's data.
 
-- It performed best on smaller sites: **fewer than 500 victims** and **fewer than 12 victims per page**.
-- On those sites it reached **up to 75% content similarity** with ransomware.live's data, excluding the country and industry fields.
-- Larger sites with heavy pagination remain a limitation.
+- **Victim names:** 84-100% semantic similarity across all five groups.
+- **Coverage:** 100% on The Gentlemen (43 victims) and 95.6% on Qilin's 33-page, 457-victim table; lowest was 41.7% on Akira's terminal-style interface.
+- **Known limitations:** pages listing more than ~20-25 victims exceed the model's output token budget, and long scrapes cannot yet detect or recover from dropped Tor connections.
 
 ## So what does this Repo contain?
 
